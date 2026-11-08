@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "title": "截断自动续写",
+    "description": "系统自动识别回答因达到输出上限被截断，并自动发送“继续”让模型接着输出。"
+  },
+  "continue": "继续",
+  "auto": "自动续写",
+  "caption": "回答因达到输出上限被截断，已保留在对话中。",
+  "toggleAria": "切换自动续写",
+  "configTitle": "自动续写策略",
+  "configHint": "系统自动识别「输出已达上限」时：",
+  "modeSilent": "系统自动续写（无感，不打扰）",
+  "modeButton": "显示状态并自动续写",
+  "modeOff": "仅显示按钮，手动续写",
+  "modeSilentHint": "截断一旦发生，系统自动发送「继续」并接着输出，界面上只多一条「继续」消息。",
+  "modeButtonHint": "显示自动续写状态与按钮，并自动续写。",
+  "modeOffHint": "只显示按钮，由你决定是否续写。",
+  "autoProgress": "正在自动续写…",
+  "autoDone": "已自动发送「继续」，模型正在接着输出。",
+  "autoOffNote": "已发送「继续」。",
+  "hostActive": "系统正在自动续写…",
+  "hostHint": "已启用系统级无感续写（无需手动操作）。"
+}

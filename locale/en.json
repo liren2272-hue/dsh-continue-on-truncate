@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "title": "Auto-continue on truncation",
+    "description": "The system detects when an answer is cut off by the output-token limit and automatically sends “continue” to let the model resume."
+  },
+  "continue": "Continue",
+  "auto": "Auto-continue",
+  "caption": "The reply was truncated by the output limit and kept in the conversation.",
+  "toggleAria": "Toggle auto-continue",
+  "configTitle": "Auto-continue mode",
+  "configHint": "When the system detects “output limit reached”:",
+  "modeSilent": "System auto-continue (silent, no UI)",
+  "modeButton": "Show status & auto",
+  "modeOff": "Button only, manual",
+  "modeSilentHint": "Automatically sends “continue” and keeps outputting; only a “continue” message appears.",
+  "modeButtonHint": "Shows the auto-continue status and button, and continues automatically.",
+  "modeOffHint": "Shows a button; you decide when to continue.",
+  "autoProgress": "Auto-continuing…",
+  "autoDone": "Sent “continue”; the model is resuming.",
+  "autoOffNote": "Sent “continue”.",
+  "hostActive": "System is auto-continuing…",
+  "hostHint": "System-level seamless continuation is active (no manual action needed)."
+}

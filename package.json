@@ -1,0 +1,34 @@
+{
+  "name": "@local/dsh-continue-on-truncate",
+  "version": "2.0.0",
+  "icon": "./icon.svg",
+  "private": true,
+  "description": "Auto-sends “继续” when an answer is truncated by the output-token limit, with a manual Continue button and an auto-continue toggle.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-chat"
+      ]
+    }
+  }
+}
