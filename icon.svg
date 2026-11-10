@@ -1,4 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
-  <rect width="48" height="48" rx="10" fill="#5686fe"/>
-  <path d="M16 22h13l-4-4 2.4-2.4L35 24l-7.6 7.6L25 29l4-4H16z" fill="#ffffff"/>
+  <!-- Theme-aware plugin mark.
+       v2 hardcoded a brand-blue rect (#5686fe) + white arrow, which clashed with
+       DSH's neutral monochrome dark theme. v3 mirrors DSH's primary button: the
+       chip INVERTS with the theme (dark chip in light mode, light chip in dark
+       mode) and the arrow always contrasts with the chip. Colors come from DSH's
+       real alias tokens. When the SVG is inlined into DSH DOM the var() tokens
+       follow the live theme (chip inverts light↔dark). When loaded as a separate
+       <img> document the var() falls back to a dark chip + white arrow — a
+       self-contained high-contrast mark that stays readable on ANY background,
+       exactly like DSH's primary button, so it never clashes with night mode. -->
+  <style>
+    .cot-bg { fill: var(--dsw-alias-button-primary-fill, #0f1115); }
+    .cot-fg { fill: var(--dsw-alias-label-primary-foreground, #ffffff); }
+  </style>
+  <rect class="cot-bg" width="48" height="48" rx="10"/>
+  <path class="cot-fg" d="M16 22h13l-4-4 2.4-2.4L35 24l-7.6 7.6L25 29l4-4H16z"/>
 </svg>
