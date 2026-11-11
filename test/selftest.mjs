@@ -129,7 +129,7 @@ async function hostSuite(dir, tag, isPatched) {
 
   if (isPatched) {
     ok(r.snap && r.snap.active === true, 'GET /host-active returns active:true');
-    ok(r.snap && r.snap.version === '3.3.0', 'GET /host-active reports version 3.3.0 (runtime proof after restart)');
+    ok(r.snap && r.snap.version === '3.4.0', 'GET /host-active reports version 3.4.0 (runtime proof after restart)');
     ok(r.snap && r.snap.maxContinuations === 10, 'GET reports runtime cap from config (10)');
     ok(r.snap && r.snap.capMin === 1 && r.snap.capMax === 50, 'GET reports cap bounds 1..50');
     ok(allFollowup, 'continuations go through agent.followup() (FRESH TURN), never steer()');
@@ -175,6 +175,12 @@ async function hostSuite(dir, tag, isPatched) {
       ok(hi && hi.maxContinuations === 50, 'POST out-of-range 999 clamps to capMax 50');
       ok(lo && lo.maxContinuations === 1, 'POST out-of-range 0 clamps to capMin 1');
       ok(bad && bad.maxContinuations === 1, 'POST non-numeric cap ignored (keeps previous 1)');
+      // v3.4: the snapshot must EXPOSE that the value was not taken verbatim, so
+      // the settings card can avoid reporting a clamp as "saved".
+      ok(hi && hi.capAccepted === false && hi.capRequested === 999, 'GET/POST snapshot flags a clamped value (capAccepted:false, capRequested:999)');
+      ok(bad && bad.capAccepted === false, 'GET/POST snapshot flags a refused value (capAccepted:false)');
+      const exact = await callRoute(ctx._routes, 'POST', JSON.stringify({ maxContinuations: 12 }));
+      ok(exact && exact.maxContinuations === 12 && exact.capAccepted === true, 'accepted value reports capAccepted:true with the applied cap');
     }
   } else {
     // NEGATIVE CONTROL: the v3.2 build must NOT satisfy the v3.3 contract.
@@ -253,6 +259,8 @@ async function clientSuite(dir, tag, isPatched) {
     ok(c.htmlAttrs['data-cot-mode'] === 'silent', 'html[data-cot-mode] set to current mode at apply()');
     ok(src.includes('const clientFallback = !host.active'), 'client keeps host-driven gating (never double-continues)');
     ok(src.includes('readCap') && src.includes('writeCap') && src.includes('syncHostCap'), 'client has cap persistence + host-cap sync helpers');
+    ok(src.includes('res.applied === v && res.accepted !== false'), 'client only reports "saved" when the host accepted the exact value');
+    ok(src.includes("t('capRejected')") && src.includes("t('capClamped')"), 'client has honest rejected/clamped copy (no false "applied")');
     ok(src.includes("'data-cot': 'cap-input'") && src.includes("'data-cot': 'cap-apply'"), 'settings card renders cap input + Apply button');
     ok(!!c.dictionaries.zh.capTitle && !!c.dictionaries.en.capTitle, 'cap panel has zh+en labels');
   } else {

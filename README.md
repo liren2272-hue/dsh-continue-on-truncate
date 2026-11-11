@@ -8,7 +8,39 @@
 续写永远是带 `source.kind = "dsh-continue-on-truncate"` 的**机器消息**，绝不伪装成一条
 真人「继续」气泡。
 
-当前版本 **v3.3.0**。
+当前版本 **v3.4.0**。
+
+---
+
+## v3.4 修了什么（「连续续写次数」那一行：值要存下来、推给宿主，宿主不接受时不许谎称已生效）
+
+设置卡片里的「连续续写次数」一行（数字 1–50 + 应用）此前有两个诚实性问题：
+
+1. **宿主拒收也会显示「已保存到运行中的宿主」**。`syncHostCap()` 把响应折成一个数字，
+   `null`（不可达 / 非 2xx / 响应里没有 cap 字段）与「宿主真的接受了」在调用方看来一样；
+   只要曾经探测到 cap 字段（`hostCapLive`），点「应用」就固定显示成功。
+2. **宿主把值钳到自己的范围，面板仍回显用户输入的数字**，看不出实际跑的是别的值。
+
+修法：
+- `syncHostCap()` 改返回对象 `{ok, applied, accepted}`——只有拿到 2xx 且响应里带回
+  `maxContinuations` 才算 `ok:true`；`applied` 永远是**宿主回报的实际值**。
+- 宿主 `index.js` 在快照里新增 `capRequested` / `capAccepted`：被 `sanitizeCap()` 钳过或
+  被丢弃时 `capAccepted:false`，版本号 `3.4.0`。
+- 面板文案按宿主裁决分支，**没有任何「本地成功」路径**：
+  | 宿主反应 | 面板显示 |
+  | --- | --- |
+  | 接受且值相同 | `capSaved`（已保存到运行中的宿主） |
+  | 接受但钳过值 | `capClamped` + 宿主实际值（警示色） |
+  | 非 2xx / 不可达 | `capRejected`（宿主未接受该值，未生效） |
+  | 老宿主无 cap 字段 | `capPending`（已存本机；宿主未确认接收，尚未生效） |
+  | 输入越界 | `capInvalid`，且**不发** POST |
+- 值仍然先写 `localStorage`（`@local/dsh-continue-on-truncate.cap`），下次 `apply()` 再推一次，
+  所以「存下来」与「推给宿主」两件事都保留，但显示的是宿主的真实裁决。
+- 中英两份字典同步新增 `capRejected` / `capClamped`，并把 `capPending` 从
+  「宿主重启后生效」改成「宿主未确认接收，尚未生效」（旧措辞是没根据的承诺）。
+
+离线验收：`node test/card-cap.test.mjs`（假 React + 假 hook store，覆盖 接受 / 钳值 /
+500 / 不可达 / 老宿主 / 越界 六种宿主反应，逐条断言状态文案与 POST 体）。
 
 ---
 

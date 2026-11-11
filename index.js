@@ -1,4 +1,4 @@
-// Host half of @local/dsh-continue-on-truncate (v3.3).
+// Host half of @local/dsh-continue-on-truncate (v3.4).
 //
 // Seamless continuation at the AGENT layer. When a model step ends at the
 // output token limit (finish.kind === "max-tokens"), we queue a continuation
@@ -210,6 +210,10 @@ export function apply(ctx, config, meta) {
   // works as an admin default), then can be overridden at runtime via POST.
   let runtimeCap = cfg.maxContinuations;
   const cap = () => runtimeCap;
+  // v3.4: verdict of the LAST POST {maxContinuations}. The settings card must
+  // be able to distinguish "host applied it" from "host refused / clamped it",
+  // otherwise a rejected value would be reported as saved.
+  let capVerdict = null;
 
   const ROUTE = '/dsh-continue-on-truncate/host-active';
   let lastSteerTs = 0;
@@ -274,8 +278,10 @@ export function apply(ctx, config, meta) {
   }
   // Version is reported so a single GET /host-active probe proves which build
   // the RUNNING host actually loaded (disk mtime / restart time are weaker
-  // evidence). 3.3.0 = fresh-turn continuation via agent.followup().
-  const HOST_VERSION = '3.3.0';
+  // evidence). 3.4.0 = fresh-turn continuation via agent.followup() PLUS an
+  // explicit cap verdict (capRequested / capAccepted) so the settings card can
+  // never report a clamped or refused cap as applied.
+  const HOST_VERSION = '3.4.0';
   function snapshot() {
     const now = Date.now();
     return {
@@ -287,7 +293,9 @@ export function apply(ctx, config, meta) {
       lastSteerTs,
       maxContinuations: cap(),
       capMin: CAP_MIN,
-      capMax: CAP_MAX
+      capMax: CAP_MAX,
+      capRequested: capVerdict ? capVerdict.requested : cap(),
+      capAccepted: capVerdict ? capVerdict.accepted : true
     };
   }
   function respond(res, obj) {
@@ -340,10 +348,16 @@ export function apply(ctx, config, meta) {
                   log('steerEnabled = ' + steerEnabled + ' (via client mode sync)');
                 }
                 if (d && Object.prototype.hasOwnProperty.call(d, 'maxContinuations')) {
+                  const requested = Number(d.maxContinuations);
                   const next = sanitizeCap(d.maxContinuations);
                   if (next !== null) {
                     runtimeCap = next;
+                    capVerdict = { requested, applied: next, accepted: next === requested };
                     log('maxContinuations = ' + runtimeCap + ' (via settings panel)');
+                  } else {
+                    // Unusable value: keep the running cap and say so out loud.
+                    capVerdict = { requested, applied: runtimeCap, accepted: false };
+                    log('maxContinuations rejected: ' + String(d.maxContinuations));
                   }
                 }
               } catch (err) {

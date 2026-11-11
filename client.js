@@ -1,4 +1,9 @@
-// Client half of @local/dsh-continue-on-truncate (v3.3).
+// Client half of @local/dsh-continue-on-truncate (v3.4).
+//
+// v3.4 — honest reporting for the "连续续写次数" row: the settings card's
+// Apply now always pushes to the host and lets the HOST VERDICT pick the copy
+// ({ok:false} / clamped -> "not in effect", never "saved"). v3.3 could report
+// a value as saved when the host never accepted it.
 //
 // What it does
 // ------------
@@ -75,7 +80,9 @@ window.__ModuleLoader__.load({
       capUnit: '回合',
       capApply: '应用',
       capSaved: '已保存到运行中的宿主',
-      capPending: '已存本机，宿主重启后生效',
+      capPending: '已存本机；宿主未确认接收，尚未生效',
+      capRejected: '宿主未接受该值，未生效',
+      capClamped: '宿主只接受该范围内的值，已按',
       capRange: '可填 1–50',
       capInvalid: '请输入 1–50 的整数',
       capHostDefault: '宿主默认：',
@@ -108,7 +115,9 @@ window.__ModuleLoader__.load({
       capUnit: 'turns',
       capApply: 'Apply',
       capSaved: 'Saved to the running host',
-      capPending: 'Saved locally; takes effect after the host restarts',
+      capPending: 'Saved locally; the host did NOT confirm it — not in effect yet',
+      capRejected: 'The host did not accept this value — not in effect',
+      capClamped: 'The host accepts a narrower range only; applied',
       capRange: 'Range 1–50',
       capInvalid: 'Enter an integer 1–50',
       capHostDefault: 'Host default:',
@@ -215,9 +224,13 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // v3.2: push the runtime continuation cap to the host. Returns the host's
-    // clamped value (or null when unreachable) so the panel can show the truth.
+    // v3.4: push the runtime continuation cap to the host. The result is an
+    // OBJECT, never a bare number/null: the panel must be able to tell
+    //   {ok:true, applied:n}  host accepted (n = the value the host really runs)
+    //   {ok:false, applied:null} host unreachable / non-2xx / no cap field
+    // apart, so a rejected value can never be reported as applied.
     function syncHostCap(value) {
+      const failed = { ok: false, applied: null };
       try {
         return fetch(ROUTE, {
           method: 'POST',
@@ -225,11 +238,15 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ maxContinuations: value }),
           cache: 'no-store'
         })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((d) => (d && Number(d.maxContinuations)) || null)
-          .catch(() => null);
+          .then((r) => (r && r.ok ? r.json() : null))
+          .then((d) => {
+            const applied = d && Number(d.maxContinuations);
+            if (!applied || !Number.isFinite(applied)) return failed;
+            return { ok: true, applied, accepted: d.capAccepted !== false };
+          })
+          .catch(() => failed);
       } catch {
-        return Promise.resolve(null);
+        return Promise.resolve(failed);
       }
     }
 
@@ -609,7 +626,10 @@ html[data-cot-mode="button"] div[role="status"]:has([class*="maxTokensTitle"]) {
           const [capStatus, setCapStatus] = useState('');
           const [capError, setCapError] = useState(false);
           const [hostCap, setHostCap] = useState(0);
-          const [hostCapLive, setHostCapLive] = useState(false);
+          // hostLegacy = the route answered but reports NO maxContinuations (a
+          // pre-3.4 host): it can never accept the cap, only ignore it. Kept
+          // separate from "unreachable" so the copy can stay honest about which.
+          const [hostLegacy, setHostLegacy] = useState(false);
           const [saving, setSaving] = useState(false);
           useEffect(() => subscribeMode((e) => setMode(e && e.detail ? e.detail : readMode())), []);
 
@@ -619,18 +639,18 @@ html[data-cot-mode="button"] div[role="status"]:has([class*="maxTokensTitle"]) {
             let alive = true;
             probeHost().then((h) => {
               if (!alive) return;
-              // A pre-3.2 host (no maxContinuations field in GET) cannot accept
-              // the runtime cap; still persist locally and show the honest
-              // "after restart" note. The cap field is the version-agnostic proof.
+              // A host that answers the probe but reports no maxContinuations
+              // (pre-3.4 build) can only IGNORE the cap, never accept it. Record
+              // that so the copy says "local only" instead of "saved".
               const live = !!(h.active && h.maxContinuations);
-              setHostCapLive(live);
-              if (h.active && h.maxContinuations) setHostCap(h.maxContinuations);
+              setHostLegacy(!!h.active && !h.maxContinuations);
+              if (live) setHostCap(h.maxContinuations);
               const v = readCap();
               setCapText(String(v));
               if (live) {
-                syncHostCap(v).then((applied) => {
-                  if (!alive) return;
-                  if (applied) setHostCap(applied);
+                syncHostCap(v).then((res) => {
+                  if (!alive || !res || !res.ok) return;
+                  setHostCap(res.applied);
                 });
               }
             });
@@ -653,25 +673,29 @@ html[data-cot-mode="button"] div[role="status"]:has([class*="maxTokensTitle"]) {
             setCapError(false);
             setCapStatus('');
             const v = Math.round(n);
-            writeCap(v);
-            if (!hostCapLive) {
-              // Old host: value is persisted locally; apply() re-pushes it to
-              // the host after the user restarts the desktop. Be honest about it.
+            writeCap(v); // remember locally first; the host verdict decides the copy
+            // v3.4: ALWAYS try the host and let its answer decide the message.
+            // No local-only "success" path: an unreachable or refusing host must
+            // never be reported as applied.
+            syncHostCap(v).then((res) => {
               setSaving(false);
-              setCapError(true);
-              setCapStatus(t('capPending'));
-              return;
-            }
-            syncHostCap(v).then((applied) => {
-              setSaving(false);
-              if (applied) {
-                setHostCap(applied);
-                setCapText(String(applied));
-                setCapStatus(t('capSaved'));
-              } else {
-                setCapError(true);
-                setCapStatus(t('hostAbsentNote'));
+              if (res && res.ok) {
+                setHostCap(res.applied);
+                setCapText(String(res.applied));
+                if (res.applied === v && res.accepted !== false) {
+                  setCapError(false);
+                  setCapStatus(t('capSaved'));
+                } else {
+                  // Host clamped to its own bounds: show what it actually runs.
+                  setCapError(true);
+                  setCapStatus(t('capClamped') + ' ' + res.applied + ' ' + t('capUnit'));
+                }
+                return;
               }
+              setCapError(true);
+              // Old host: value lives only on this machine. Unreachable/refusing
+              // host: nothing took effect. Neither one may claim success.
+              setCapStatus(hostLegacy ? t('capPending') : t('capRejected'));
             });
           }
 
@@ -688,7 +712,7 @@ html[data-cot-mode="button"] div[role="status"]:has([class*="maxTokensTitle"]) {
               type: 'number', min: CAP_MIN, max: CAP_MAX, step: 1,
               className: 'cotcfg-cap-input', 'data-cot': 'cap-input',
               value: capText,
-              onChange: (e) => { setCapText(e && e.target ? e.target.value : ''); setCapStatus(''); },
+              onChange: (e) => { setCapText(e && e.target ? e.target.value : ''); setCapStatus(''); setCapError(false); },
               onKeyDown: (e) => { if (e && e.key === 'Enter') applyCap(); }
             }),
             React.createElement('span', { className: 'cotcfg-cap-unit' }, t('capUnit')),
