@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-continue-on-truncate",
-  "version": "3.3.0",
+  "version": "3.5.0",
   "icon": "./icon.svg",
   "private": true,
   "description": "Resumes output-token-truncated answers as a MACHINE continuation queued into a FRESH TURN via agent.followup() (never a fake human \"继续\"), so the core loop resets its latched turnEnds and the reply finishes cleanly; also rewrites the misleading native \"send 继续\" hint into an accurate auto-continued notice.",

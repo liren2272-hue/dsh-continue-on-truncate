@@ -23,7 +23,7 @@
   "machineBadge": "Auto (system)",
   "manualBadge": "Manual (you)",
   "capTitle": "Continuation limit",
-  "capHint": "Max fresh turns the system auto-opens after one truncation (prevents infinite loops). Applies immediately and is remembered.",
+  "capHint": "Max fresh turns the system auto-opens after ONE truncation (bounds THIS reply only; the next reply resets the count, to prevent infinite loops). Applies immediately and is remembered.",
   "capUnit": "turns",
   "capApply": "Apply",
   "capSaved": "Saved to the running host",

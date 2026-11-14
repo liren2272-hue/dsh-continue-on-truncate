@@ -1,7 +1,14 @@
-// Client half of @local/dsh-continue-on-truncate (v3.4).
+// Client half of @local/dsh-continue-on-truncate (v3.5).
+//
+// v3.5 — the continuation cap is PER-ANSWER: the host resets it on every
+// genuine user message, so the limit below bounds ONE reply's truncation chain
+// and the next reply starts from a full count. v3.4 only reset the count when a
+// chain closed cleanly or hit the cap, so a chain that leaked (tool-call
+// mid-flight / interruption) made the cap accumulate across the whole
+// conversation.
 //
 // v3.4 — honest reporting for the "连续续写次数" row: the settings card's
-// Apply now always pushes to the host and lets the HOST VERDICT pick the copy
+// Apply always pushes to the host and lets the HOST VERDICT pick the copy
 // ({ok:false} / clamped -> "not in effect", never "saved"). v3.3 could report
 // a value as saved when the host never accepted it.
 //
@@ -76,7 +83,7 @@ window.__ModuleLoader__.load({
       machineBadge: '机器自动续写',
       manualBadge: '手动（真人）',
       capTitle: '连续续写次数',
-      capHint: '一次截断后，系统最多自动续写多少个新回合（防止无限循环）。改动立即生效，并会记住。',
+      capHint: '单次回答被截断后，系统最多自动续写多少个新回合（仅约束本次回答，下一条回答自动重新计数；防止无限循环）。改动立即生效，并会记住。',
       capUnit: '回合',
       capApply: '应用',
       capSaved: '已保存到运行中的宿主',
@@ -111,7 +118,7 @@ window.__ModuleLoader__.load({
       machineBadge: 'Auto (system)',
       manualBadge: 'Manual (you)',
       capTitle: 'Continuation limit',
-      capHint: 'Max fresh turns the system auto-opens after one truncation (prevents infinite loops). Applies immediately and is remembered.',
+      capHint: 'Max fresh turns the system auto-opens after ONE truncation (bounds THIS reply only; the next reply resets the count, to prevent infinite loops). Applies immediately and is remembered.',
       capUnit: 'turns',
       capApply: 'Apply',
       capSaved: 'Saved to the running host',

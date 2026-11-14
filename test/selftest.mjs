@@ -97,6 +97,22 @@ async function replay(buildDir, tag, config, seq, stopOnIdle = false) {
     for (const h of (L['agent/turn-stopping'] || [])) h({ agent, turn: 7, signal: {} });
   };
   for (const ev of seq) {
+    if (ev === '__user__') {
+      // v3.5: a genuine human message (source.kind === "user") starts a NEW
+      // answer and must refill the per-answer continuation budget.
+      for (const h of (L['agent/inbox/inserted'] || [])) h({ agent, message: { role: 'user', source: { kind: 'user' } } });
+      continue;
+    }
+    if (ev === '__machine__') {
+      // A machine injection (tool context) must NOT refill the budget.
+      for (const h of (L['agent/inbox/inserted'] || [])) h({ agent, message: { role: 'user', source: { kind: 'tool-context' } } });
+      continue;
+    }
+    if (ev === '__cont__') {
+      // This plugin's OWN continuation must NOT refill the budget either.
+      for (const h of (L['agent/inbox/inserted'] || [])) h({ agent, message: { role: 'user', source: { kind: 'dsh-continue-on-truncate' }, __dsh_continue_on_truncate_continuation__: true } });
+      continue;
+    }
     if (ev === 'stopping') {
       const before = calls.length;
       stopping();
@@ -129,9 +145,10 @@ async function hostSuite(dir, tag, isPatched) {
 
   if (isPatched) {
     ok(r.snap && r.snap.active === true, 'GET /host-active returns active:true');
-    ok(r.snap && r.snap.version === '3.4.0', 'GET /host-active reports version 3.4.0 (runtime proof after restart)');
+    ok(r.snap && r.snap.version === '3.5.0', 'GET /host-active reports version 3.5.0 (runtime proof after restart)');
     ok(r.snap && r.snap.maxContinuations === 10, 'GET reports runtime cap from config (10)');
     ok(r.snap && r.snap.capMin === 1 && r.snap.capMax === 50, 'GET reports cap bounds 1..50');
+    ok(r.snap && r.snap.countScope === 'per-answer', 'GET reports countScope=per-answer (cap bounds one reply, not the session)');
     ok(allFollowup, 'continuations go through agent.followup() (FRESH TURN), never steer()');
     ok(r.followups.length === 2, 'exactly 2 followups for 2 truncations, clean finish adds none (got ' + r.followups.length + ')');
     ok(r.hasTurnStopping, 'registers agent/turn-stopping (the ONLY continuation trigger)');
@@ -148,6 +165,36 @@ async function hostSuite(dir, tag, isPatched) {
       'max-tokens', 'stopping', 'max-tokens', 'stopping'
     ], true);
     ok(capResult.followups.length === 2, 'maxContinuations=2 caps the fresh-turn chain at exactly 2 (got ' + capResult.followups.length + ')');
+
+    // v3.5: PER-ANSWER cap. Two separate answers, each truncated at cap=1,
+    // must each get their own full budget (2 followups total), NOT share one
+    // session-wide counter that would stop at 1.
+    {
+      const perAnswer = await replay(dir, tag + '_peranswer', { maxContinuations: 1 }, [
+        'max-tokens', 'stopping',   // answer A truncated once (cap=1) -> 1 followup
+        '__user__',                  // a genuine human message starts answer B
+        'max-tokens', 'stopping'    // answer B truncated once -> fresh budget -> 1 followup
+      ]);
+      ok(perAnswer.followups.length === 2, 'PER-ANSWER cap=1: answer A and answer B each get 1 followup (got ' + perAnswer.followups.length + ')');
+      ok(perAnswer.snap && perAnswer.snap.countScope === 'per-answer', 'PER-ANSWER snapshot reports countScope=per-answer');
+    }
+
+    // v3.5 negative control: machine injections / our own continuation do NOT
+    // refill the budget, so an unfinished chain still respects the cap.
+    {
+      const noReset = await replay(dir, tag + '_noreset', { maxContinuations: 1 }, [
+        'max-tokens', 'stopping',   // answer A truncated once -> 1 followup
+        '__cont__',                  // our own continuation insertion must NOT refill
+        'max-tokens', 'stopping'    // same answer still chained -> cap already spent -> 0 more
+      ]);
+      ok(noReset.followups.length === 1, 'PER-ANSWER: our own continuation does NOT refill the budget (still 1 followup, got ' + noReset.followups.length + ')');
+      const noResetMachine = await replay(dir, tag + '_noresetmachine', { maxContinuations: 1 }, [
+        'max-tokens', 'stopping',   // answer A truncated once -> 1 followup
+        '__machine__',               // a tool-context injection must NOT refill
+        'max-tokens', 'stopping'    // same answer still chained -> cap already spent -> 0 more
+      ]);
+      ok(noResetMachine.followups.length === 1, 'PER-ANSWER: a tool-context injection does NOT refill the budget (still 1 followup, got ' + noResetMachine.followups.length + ')');
+    }
 
     // mode=off via POST disables machine continuation.
     {
@@ -269,7 +316,7 @@ async function clientSuite(dir, tag, isPatched) {
     // NOT a v3.3 feature. What is new is the fresh-turn mechanism wording.)
     ok(!src.includes('(v3.3)'), 'BASELINE client header is NOT v3.3 (expected RED feature)');
     ok(!src.includes('followup'), 'BASELINE client has NO followup() fresh-turn description (expected RED feature)');
-    ok(src.includes('同一回合') || src.includes('in the same turn'), 'BASELINE still has the WRONG "同一回合 / same turn" wording that v3.3 removed (expected RED feature)');
+    ok(src.includes('同一回合') || /same\s+turn/i.test(src), 'BASELINE still has the WRONG "同一回合 / same turn" wording that v3.3 removed (expected RED feature)');
     ok(src.includes('agent.steer()'), 'BASELINE client still describes agent.steer() (expected RED feature)');
   }
   return c;

@@ -8,7 +8,7 @@
 续写永远是带 `source.kind = "dsh-continue-on-truncate"` 的**机器消息**，绝不伪装成一条
 真人「继续」气泡。
 
-当前版本 **v3.4.0**。
+当前版本 **v3.5.0**。
 
 ---
 
@@ -41,6 +41,37 @@
 
 离线验收：`node test/card-cap.test.mjs`（假 React + 假 hook store，覆盖 接受 / 钳值 /
 500 / 不可达 / 老宿主 / 越界 六种宿主反应，逐条断言状态文案与 POST 体）。
+
+---
+
+## v3.5 修了什么（「连续续写次数」上限改为**每次回答独立**，不再整个会话累计）
+
+### 症状
+此前「连续续写次数」上限是**挂在会话（agent）上、跨回答累加**的：只要某次回答的链没有
+走「干净收尾」（`chainDone`）就进入下一条回答（工具调用中途、被打断、链状态残留等），
+`count` 不会归零，后续回答共用累加计数，表现为「整个新建对话框里所有续写次数的上限」，
+而不是用户想要的「单次回答的上限」。
+
+### 根因与信号
+`count` 原先只在两种情况下归零：链干净收尾、或撞到上限/模式关闭。核心循环里
+**用户每发一条新消息**会经 `ReactLoopInbox.splice()` 触发 `agent/inbox/inserted`，
+且该事件的 payload 由 `agentEvents` 自动注入 `agent` 字段，可用 `message.source.kind`
+区分真人类与机器注入（`app.asar` 取证：用户消息 `source.kind === "user"`，机器上下文 /
+插件自身续写 `kind !== "user"`）。
+
+### 修复：监听 `agent/inbox/inserted`，用户新消息即重置预算
+- `index.js` 新增 `isUserMessage(message)`（判 `message.source.kind === 'user'`）与
+  `ctx.on('agent/inbox/inserted', ...)`：**只有用户消息**才调用 `resetBudget(agent)`，
+  把 `count` 归零、清空链状态，开启一条全新回答的满额预算；
+  机器注入（工具上下文、插件自身续写等 `kind !== 'user'`）**不**重置，避免绕过上限。
+- `snapshot()` 新增 `countScope:"per-answer"`，供 `GET /host-active` 与客户端说明口径，
+  版本号 `3.4.0 → 3.5.0`。
+- 客户端 `client.js` 与中英字典的 `capHint` 改为「**仅约束本次回答，下一条回答自动重新计数**」，
+  与新口径一致（v3.4 的诚实上报逻辑保留）。
+
+离线验收：`node test/selftest.mjs <baseline-dir>` 新增 PER-ANSWER 正向用例
+（cap=1，两条回答各得 1 次续写共 2 次）与两条负向用例（插件自身续写 / 工具上下文注入
+都不重置，仍只 1 次），以及 `countScope=per-answer` 断言；负向对照仍用 v3.2 原版。
 
 ---
 
@@ -153,8 +184,9 @@
 ## 连续续写次数面板
 同一张设置卡下方有「连续续写次数」：数字框（1–50）+「应用」按钮。填好后点「应用」
 （或回车）即写入本地并把上限推给运行中的宿主，状态栏显示「已保存到运行中的宿主」及
-宿主当前上限；输入非法值会就地提示而不改动。该上限是一条截断链最多续写多少个
-**新回合**，防止模型反复打转造成无限循环；干净的 `stop` 会提前收链。
+宿主当前上限；输入非法值会就地提示而不改动。该上限**只约束这一次回答的整条截断链**，
+**下一条回答自动重新满额（每次回答独立）**，防止模型反复打转造成无限循环；干净的 `stop`
+会提前收链。
 - **版本感知（诚实回退）**：面板按 `GET /host-active` 是否回报 `maxContinuations` 判断
   宿主是否支持运行时上限，不硬编码版本号。宿主已是新版 → 即时生效；宿主仍是旧版
   （尚未重启加载新代码）→ 值照常存进 localStorage，状态栏如实显示「已存本机，宿主
@@ -201,9 +233,11 @@ node test/chain-scenario.mjs <baseline-dir>  # 连续截断回合的 fresh-turn 
 `selftest.mjs` 覆盖：
 - 宿主：每次 `max-tokens` 经 `agent.followup()` 排**新回合**续写（绝不 `steer()`）、
   `source.kind` 非 user、续写标记与 `[CONTINUATION REQUIRED]` 提示存在、`agent/turn-stopping`
-  是唯一触发点、`agent/disposed` 清理；GET 协调接口回报 `version:"3.3.0"` 与运行时 cap
+  是唯一触发点、`agent/disposed` 清理；GET 协调接口回报 `version:"3.5.0"`、
+  `countScope:"per-answer"` 与运行时 cap
   默认值/上下界；`POST {maxContinuations}` 改上限、越界夹取（999→50 / 0→1 / 非数值忽略）、
-  `POST {"enabled":false}`（mode=off）禁用；`maxContinuations=2` 恰好封顶 2 次。
+  `POST {"enabled":false}`（mode=off）禁用；`maxContinuations=2` 恰好封顶 2 次；
+  **PER-ANSWER**：cap=1 时两条回答各得满额共 2 次、插件自身续写与工具上下文注入均不重置。
 - 客户端：`native-hint-rewrite` 全局样式、`data-chat-flow-kind` 选择器、`data-cot-mode`
   门控、中英文改写文案（**不含**「同一回合 / same turn」旧措辞）、`:has` 兜底选择器、
   cap 持久化/宿主同步 helper、设置卡数字框与「应用」按钮、中英文面板文案、host 驱动门控。

@@ -1,4 +1,4 @@
-// Host half of @local/dsh-continue-on-truncate (v3.4).
+// Host half of @local/dsh-continue-on-truncate (v3.5).
 //
 // Seamless continuation at the AGENT layer. When a model step ends at the
 // output token limit (finish.kind === "max-tokens"), we queue a continuation
@@ -20,6 +20,15 @@
 //   and returns true, so kick()'s while (await this.turn()) starts a FRESH
 //   turn whose turnEnds resets to null -> the continued output can finish
 //   CLEANLY (reason=completed), with a brand-new output budget. Automatic.
+//
+// v3.5: the continuation cap is PER-ANSWER, not per-conversation. Previously
+//   state.count accumulated across every answer in one session, so a cap of N
+//   was consumed by the whole conversation. Now a genuine human message
+//   (agent/inbox/inserted with source.kind === "user") resets the budget for
+//   that agent, so each answer starts from a full cap and the cap bounds only
+//   THIS answer's truncation chain. Machine injections (tool contexts and our
+//   own continuation) do NOT reset it, so the cap still stops infinite loops
+//   within a single answer.
 //
 // Kept from v3.2:
 //  (1) HUMAN vs MACHINE boundary: source.kind stays NON-'user', so the chat
@@ -127,6 +136,16 @@ function resetBudget(agent) {
   s.chainDone = false;
   s.chainLastFinish = '';
   s.chainTurn = null;
+}
+// v3.5: true only for a message that a HUMAN put into the inbox. The core loop
+// builds user messages with `source: { kind: "user" }`; machine injections
+// (tool additionalContexts, action-card notices) and this plugin's own
+// continuation (`source.kind = SOURCE_KIND`) carry a different kind. This is the
+// signal that a NEW answer has started, and therefore that the per-answer cap
+// must be refilled.
+function isUserMessage(message) {
+  const src = message && message.source;
+  return !!(src && typeof src === 'object' && src.kind === 'user');
 }
 function clearState(agent) {
   agentState.delete(agentKey(agent));
@@ -278,10 +297,11 @@ export function apply(ctx, config, meta) {
   }
   // Version is reported so a single GET /host-active probe proves which build
   // the RUNNING host actually loaded (disk mtime / restart time are weaker
-  // evidence). 3.4.0 = fresh-turn continuation via agent.followup() PLUS an
+  // evidence). 3.5.0 = fresh-turn continuation via agent.followup() PLUS an
   // explicit cap verdict (capRequested / capAccepted) so the settings card can
-  // never report a clamped or refused cap as applied.
-  const HOST_VERSION = '3.4.0';
+  // never report a clamped or refused cap as applied, PLUS a PER-ANSWER cap
+  // (reset on a genuine user message, not accumulated over the conversation).
+  const HOST_VERSION = '3.5.0';
   function snapshot() {
     const now = Date.now();
     return {
@@ -292,6 +312,7 @@ export function apply(ctx, config, meta) {
       steerCount,
       lastSteerTs,
       maxContinuations: cap(),
+      countScope: 'per-answer',
       capMin: CAP_MIN,
       capMax: CAP_MAX,
       capRequested: capVerdict ? capVerdict.requested : cap(),
@@ -466,6 +487,25 @@ export function apply(ctx, config, meta) {
       }
       queueContinuation(ag, 'turn-stopping');
       // returning undefined => no bail; other serial listeners proceed
+    },
+    { global: true }
+  );
+
+  // --- v3.5: PER-ANSWER cap reset on a genuine human message ----------------
+  // agent/inbox/inserted fires for EVERY insertion (user messages, tool context
+  // injections, and our own continuation). Only source.kind === "user" marks a
+  // NEW answer, so that is the only case that refills the continuation budget.
+  // Resetting here closes the leak where a chain that never took the
+  // clean-finish path (tool-call mid-flight, interruption) left its count
+  // behind and the NEXT answer inherited a partially spent cap.
+  ctx.on(
+    'agent/inbox/inserted',
+    ({ agent, message }) => {
+      const ag = agent && (typeof agent.followup === 'function' || typeof agent.steer === 'function') ? agent : null;
+      if (!ag) return;
+      if (!isUserMessage(message)) return; // machine injection: keep the current chain's budget
+      resetBudget(ag);
+      log('agent ' + ag.id + ' new user message -> PER-ANSWER cap reset (count=0)');
     },
     { global: true }
   );
