@@ -301,7 +301,7 @@ export function apply(ctx, config, meta) {
   // explicit cap verdict (capRequested / capAccepted) so the settings card can
   // never report a clamped or refused cap as applied, PLUS a PER-ANSWER cap
   // (reset on a genuine user message, not accumulated over the conversation).
-  const HOST_VERSION = '3.5.0';
+  const HOST_VERSION = '3.5.1';
   function snapshot() {
     const now = Date.now();
     return {
